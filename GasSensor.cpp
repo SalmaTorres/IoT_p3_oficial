@@ -21,7 +21,9 @@ void GasSensor::update() {
     float ratio = rs / ro;
     ppm = getGasPPM(ratio, curve);
 
-    Serial.print("Concentración estimada de gas LPG: ");
+    Serial.print("RS: "); Serial.print(rs);
+    Serial.print(" | RS/Ro: "); Serial.print(ratio);
+    Serial.print(" | Concentración estimada de gas LPG: ");
     Serial.print(ppm);
     Serial.println(" ppm");
 }
@@ -35,14 +37,17 @@ float GasSensor::getRo() {
 }
 
 float GasSensor::getRawResistance() {
-    float rs = readMQ();
-    return rs;
+    return readMQ();
 }
 
 float GasSensor::calibrateSensor() {
     float val = 0;
     for (int i = 0; i < 50; i++) {
-        val += calculateResistance(analogRead(analogPin));
+        int adc = analogRead(analogPin);
+        float rs = calculateResistance(adc);
+        Serial.print("ADC calibración: "); Serial.print(adc);
+        Serial.print(" | RS: "); Serial.println(rs);
+        if (rs > 0) val += rs;
         delay(200);
     }
     return (val / 50.0) / RO_CLEAN_AIR_FACTOR;
@@ -52,9 +57,12 @@ float GasSensor::readMQ() {
     float rs = 0;
     int n = 0;
     for (int i = 0; i < 5; i++) {
-        int raw = analogRead(analogPin); // ← corregido: leer ADC
+        int raw = analogRead(analogPin);
         float r = calculateResistance(raw);
-        if (r > 0) { rs += r; n++; }
+        if (r > 0) {
+            rs += r;
+            n++;
+        }
         delay(50);
     }
     return n ? rs / n : -1;
@@ -62,12 +70,12 @@ float GasSensor::readMQ() {
 
 float GasSensor::calculateResistance(int adc_value) {
     if (adc_value <= 0) return -1;
-    return ((float)RL_VALUE * (4095.0 - adc_value)) / adc_value; // ← 4095 para ESP32
+    return ((float)RL_VALUE * (4095.0 - adc_value)) / adc_value;
 }
 
 float GasSensor::getGasPPM(float rs_ro_ratio, float* curve) {
-    if (rs_ro_ratio <= 0) return 0;
-    float log_ppm = ((log10(rs_ro_ratio) - curve[1]) / curve[2]) + curve[0];
+    if (rs_ro_ratio <= 0 || curve[2] == 0) return 0;
+    float log_ppm = (log10(rs_ro_ratio) - curve[1]) / curve[2] + curve[0];
     float ppm = pow(10, log_ppm);
     if (isnan(ppm) || isinf(ppm) || ppm > 10000) return 0;
     return ppm;

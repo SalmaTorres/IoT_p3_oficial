@@ -6,7 +6,6 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "BuzzerController.h"
-#include "ValveController.h"
 #include "GasSensor.h"
 
 class IoTClient {

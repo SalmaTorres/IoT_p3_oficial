@@ -18,9 +18,9 @@ public:
     void onMessageReceived(char* topic, byte* payload, unsigned int length);
 
 private: 
-    String getGasLevelStatus(int ppm);
+    String getGasLevelStatus(float ppm);  // Cambiado de int a float
 
-    int    lastGasPPM;
+    float lastGasPPM;  // Cambiado de int a float
     String lastGasStatus;
 
     WiFiClientSecure wiFiClient;
@@ -30,7 +30,6 @@ private:
     String valveState;
 
     BuzzerController buzzerController;
-    ValveController valveController;
     GasSensor gasSensor;
 
     void setupWiFi();

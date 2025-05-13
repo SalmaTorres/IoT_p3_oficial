@@ -5,7 +5,7 @@
 
 class GasSensor {
 public:
-    GasSensor(byte analogPin);
+    GasSensor(byte pin = 34);  // Constructor con pin configurable
     void begin();
     void update();
     float getPPM();
@@ -16,12 +16,15 @@ private:
     byte analogPin;
     float ro;
     float ppm;
-    float curve[3] = { 2.3, 0.21, -0.47 }; // Curva típica para LPG con MQ-2
+    unsigned long previousMillis = 0;
+    const unsigned long updateInterval = 1000;
+    
+    // Curva para LPG en el sensor MQ-2
+    const float LPG_Curve[3] = {2.3, 0.21, -0.47};
 
     float calibrateSensor();
     float readMQ();
     float calculateResistance(int adc_value);
-    float getGasPPM(float rs_ro_ratio, float* curve);
+    float getGasPPM(float rs_ro_ratio);
 };
-
 #endif

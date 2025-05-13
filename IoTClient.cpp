@@ -93,13 +93,13 @@ char output[256];
 IoTClient::IoTClient() 
     : wiFiClient(), mqttClient(wiFiClient),
       buzzerState("Off"), valveState("Closed"),
-      gasSensor(35),
+      gasSensor(34),  // Pin analógico 34 para el sensor MQ-2
       lastGasPPM(-1), lastGasStatus("") {}
 
 void IoTClient::begin() {
+    Serial.begin(115200);
     buzzerController.begin();
-    valveController.begin();
-    gasSensor.begin();
+    gasSensor.begin();  // Inicia la calibración automática
     setupWiFi();
     setupMQTT();
 }
@@ -108,33 +108,38 @@ void IoTClient::loop() {
     if (!mqttClient.connected()) reconnect();
     mqttClient.loop();
 
-    gasSensor.readMQ();
-    int ppm = (int)gasSensor.getPPM();  
-
-    Serial.print("PPM: ");  // <--- línea añadida
-    Serial.println(ppm);    // <--- línea añadida
-
+    gasSensor.update();  // Actualiza las lecturas del sensor
     updateSensor();
-    delay(1000);
 }
 
-String IoTClient::getGasLevelStatus(int ppm) {
-  if (ppm < 200) return "Normal";
-  if (ppm < 1000) return "Precaucion";
-  return "Ventilar";
+String IoTClient::getGasLevelStatus(float ppm) {  // Esto ahora coincide con el .h
+    if (ppm < 200) return "Normal";
+    if (ppm < 1000) return "Precaucion";
+    return "Ventilar";
 }
 
 void IoTClient::updateSensor() {
-    int ppm = (int)gasSensor.getPPM();       
+    float ppm = gasSensor.getPPM();       
     String status = getGasLevelStatus(ppm);
 
-    Serial.print("PPM: ");
-    Serial.print(ppm);
-    Serial.print(" - Estado: ");
-    Serial.println(status);
+    // Mostrar información detallada en el monitor serial
+    static unsigned long lastPrint = 0;
+    if (millis() - lastPrint > 2000) {  // Mostrar cada 2 segundos
+        lastPrint = millis();
+        
+        Serial.print("Resistencia: ");
+        Serial.print(gasSensor.getRawResistance());
+        Serial.print(" Ω | Ro: ");
+        Serial.print(gasSensor.getRo());
+        Serial.print(" KΩ | PPM: ");
+        Serial.print(ppm);
+        Serial.print(" | Estado: ");
+        Serial.println(status);
+    }
 
-    if (ppm != lastGasPPM || status != lastGasStatus) {
-        lastGasPPM    = ppm;
+    // Actualizar el estado solo si hay un cambio significativo
+    if (abs(ppm - lastGasPPM) > 10 || status != lastGasStatus) {
+        lastGasPPM = ppm;
         lastGasStatus = status;
         reportState();
     }
@@ -142,13 +147,18 @@ void IoTClient::updateSensor() {
 
 void IoTClient::reportState() {
     outputDoc.clear();
-    JsonObject reported = outputDoc["state"].createNestedObject("reported");
+    JsonObject state = outputDoc.createNestedObject("state");
+    JsonObject reported = state.createNestedObject("reported");
+
     reported["buzzerStatus"] = buzzerState;
     reported["valveStatus"] = valveState;
-    reported["gasLevelPPM"]  = lastGasPPM;
+    reported["gasLevelPPM"] = lastGasPPM;
     reported["gasLevelStatus"] = lastGasStatus;
+
     serializeJson(outputDoc, output);
-    mqttClient.publish(UPDATE_TOPIC, output);
+    if (!mqttClient.publish(UPDATE_TOPIC, output)) {
+        Serial.println("Error al publicar en MQTT");
+    }
 }
 
 void IoTClient::onMessageReceived(char* topic, byte* payload, unsigned int length) {
@@ -157,21 +167,22 @@ void IoTClient::onMessageReceived(char* topic, byte* payload, unsigned int lengt
     Serial.println("Message from topic " + String(topic) + ": " + message);
 
     DeserializationError err = deserializeJson(inputDoc, payload, length);
-    if (!err && String(topic) == UPDATE_DELTA_TOPIC) {
-        if (inputDoc["state"].containsKey("buzzerStatus")) {
-            String newBuzzerState = inputDoc["state"]["buzzerStatus"].as<String>();
+    if (err) {
+        Serial.print("Deserialization failed: ");
+        Serial.println(err.c_str());
+        return;
+    }
+
+    if (String(topic) == UPDATE_DELTA_TOPIC) {
+        JsonObject state = inputDoc["state"];
+        if (state.containsKey("buzzerStatus")) {
+            String newBuzzerState = state["buzzerStatus"].as<String>();
             if (newBuzzerState != buzzerState) {
                 buzzerState = newBuzzerState;
                 buzzerController.setState(buzzerState);
                 buzzerController.apply();
                 reportState();
             }
-        }
-        if (inputDoc["state"].containsKey("valveStatus")) {
-            valveState = inputDoc["state"]["valveStatus"].as<String>();
-            valveController.setState(valveState);
-            valveController.apply();
-            reportState();
         }
     }
 }
@@ -197,7 +208,6 @@ void IoTClient::setupMQTT() {
         onMessageReceived(topic, payload, length);
     });
 }
-
 
 void IoTClient::reconnect() {
     while (!mqttClient.connected()) {
